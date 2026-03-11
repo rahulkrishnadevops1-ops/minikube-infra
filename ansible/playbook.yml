@@ -8,6 +8,8 @@
     helm_version: "v3.15.4"
     target_user: "ec2-user"
     target_home: "/home/ec2-user"
+    minikube_memory_mb: 2200
+    minikube_cpus: 2
 
   pre_tasks:
     - name: Wait for SSH to become available
@@ -76,7 +78,7 @@
     - name: Start Minikube with the Docker driver
       become_user: "{{ target_user }}"
       ansible.builtin.shell: |
-        sg docker -c 'minikube status >/dev/null 2>&1 || minikube start --driver=docker --memory=4096 --cpus=2'
+        sg docker -c 'minikube status >/dev/null 2>&1 || minikube start --driver=docker --memory={{ minikube_memory_mb }} --cpus={{ minikube_cpus }}'
       args:
         executable: /bin/bash
         chdir: "{{ target_home }}"
