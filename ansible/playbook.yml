@@ -76,7 +76,7 @@
     - name: Start Minikube with the Docker driver
       become_user: "{{ target_user }}"
       ansible.builtin.shell: |
-        minikube status >/dev/null 2>&1 || minikube start --driver=docker --memory=4096 --cpus=2
+        sg docker -c 'minikube status >/dev/null 2>&1 || minikube start --driver=docker --memory=4096 --cpus=2'
       args:
         executable: /bin/bash
         chdir: "{{ target_home }}"
