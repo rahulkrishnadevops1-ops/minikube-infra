@@ -9,7 +9,7 @@ pipeline {
     string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS region for the EC2 instance')
     string(name: 'INSTANCE_TYPE', defaultValue: 'c7i.large', description: 'EC2 instance type')
     string(name: 'INSTANCE_NAME', defaultValue: 'minikube-control', description: 'Name tag for the EC2 instance')
-    string(name: 'KEY_NAME', defaultValue: '', description: 'Existing AWS EC2 key pair name')
+    string(name: 'KEY_NAME', defaultValue: 'Ansible', description: 'Existing AWS EC2 key pair name')
     string(name: 'ALLOWED_SSH_CIDR', defaultValue: '0.0.0.0/0', description: 'CIDR block allowed to SSH to the instance')
     booleanParam(name: 'AUTO_APPLY', defaultValue: true, description: 'Apply Terraform automatically')
   }
