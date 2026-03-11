@@ -10,15 +10,16 @@ This repository provisions an AWS EC2 instance with Terraform, configures it wit
 
 ## Prerequisites
 
-- AWS credentials available to Terraform and Jenkins
-- An existing EC2 key pair in AWS
-- Matching private key available locally or as a Jenkins file credential named `ec2-ssh-private-key`
+- AWS account and permissions to create EC2, security groups, and to access the S3/DynamoDB backend
+- S3 bucket and DynamoDB table for Terraform remote state (see `infra/backend.tf`)
+- An existing EC2 key pair in AWS (region `eu-north-1` by default)
+- Matching private key available locally or as a Jenkins credential
 - Terraform 1.5+
 - Ansible installed on the machine or Jenkins agent that will run the playbook
 
 ## Local usage
 
-1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and set your values, especially `key_name` for your existing AWS key pair.
+1. Update `infra/terraform.tfvars` with your values (especially `key_name`).
 2. Run Terraform.
 3. Run Ansible after Terraform generates `infra/inventory.ini`.
 
@@ -40,8 +41,23 @@ The backend is configured in `infra/backend.tf` to use S3 with DynamoDB locking.
 The `Jenkinsfile` expects:
 
 - a Linux Jenkins agent with `terraform` and `ansible-playbook`
-- AWS credentials already available in the Jenkins environment
-- a Jenkins file credential named `ec2-ssh-private-key`
+- AWS credentials via instance role on the Jenkins EC2 instance
+- a Jenkins Secret file credential containing the SSH private key
+  - ID: `ssh-private-key`
+  - Username used by Ansible: `ec2-user`
 
 The pipeline provisions the instance, uses the Terraform-generated inventory, and then installs Minikube and Helm on the EC2 host.
-# minikube-assignment
+
+## What gets created
+
+- 1 EC2 instance (`c7i-flex.large` by default) in the default VPC
+- 1 security group allowing SSH (22), HTTP (80), HTTPS (443), and NodePort range (30000-32767)
+- Ansible inventory file at `infra/inventory.ini`
+
+## Defaults in `infra/terraform.tfvars`
+
+- Region: `eu-north-1`
+- Instance type: `c7i-flex.large`
+- Instance name: `minikube-control`
+- Key pair: `Ansible`
+- SSH CIDR: `0.0.0.0/0`
