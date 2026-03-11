@@ -61,7 +61,7 @@ pipeline {
       steps {
         withCredentials([file(credentialsId: 'ssh-private-key', variable: 'ANSIBLE_KEY_FILE')]) {
           dir('ansible') {
-            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook playbook.yml --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
+            sh 'ANSIBLE_CONFIG=ansible.cfg ANSIBLE_INVENTORY_ENABLED=amazon.aws.aws_ec2 ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i aws_ec2.yaml playbook.yml --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
           }
         }
       }
@@ -74,7 +74,7 @@ pipeline {
       steps {
         withCredentials([file(credentialsId: 'ssh-private-key', variable: 'ANSIBLE_KEY_FILE')]) {
           dir('ansible') {
-            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible minikube -m shell -a "kubectl get nodes && helm version --short" --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
+            sh 'ANSIBLE_CONFIG=ansible.cfg ANSIBLE_INVENTORY_ENABLED=amazon.aws.aws_ec2 ANSIBLE_HOST_KEY_CHECKING=False ansible -i aws_ec2.yaml minikube -m shell -a "kubectl get nodes && helm version --short" --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
           }
         }
       }
