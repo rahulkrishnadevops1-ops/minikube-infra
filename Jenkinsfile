@@ -6,7 +6,6 @@ pipeline {
   }
 
   parameters {
-    booleanParam(name: 'AUTO_APPLY', defaultValue: true, description: 'Apply Terraform automatically')
     booleanParam(name: 'DESTROY', defaultValue: false, description: 'Destroy infrastructure instead of apply')
   }
 
@@ -35,10 +34,7 @@ pipeline {
       }
       steps {
         dir('infra') {
-          script {
-            def applyFlag = params.AUTO_APPLY ? '-auto-approve' : ''
-            sh "terraform apply ${applyFlag} -var-file=terraform.tfvars"
-          }
+          sh 'terraform apply -auto-approve -var-file=terraform.tfvars'
         }
       }
     }
