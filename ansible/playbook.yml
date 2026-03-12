@@ -82,7 +82,7 @@
     - name: Start Minikube with the Docker driver and API SANs
       become_user: "{{ target_user }}"
       ansible.builtin.shell: |
-        sg docker -c 'minikube start --driver=docker --memory={{ minikube_memory_mb }} --cpus={{ minikube_cpus }} --apiserver-ips={{ public_api_ip }},127.0.0.1'
+        sg docker -c 'sudo minikube start --driver=docker --memory={{ minikube_memory_mb }} --cpus={{ minikube_cpus }} --apiserver-ips={{ public_api_ip }},127.0.0.1'
       args:
         executable: /bin/bash
         chdir: "{{ target_home }}"
