@@ -176,7 +176,7 @@
 
     - name: Refresh Minikube context on host
       become_user: "{{ target_user }}"
-      ansible.builtin.command: minikube update-context
+      ansible.builtin.command: sudo minikube update-context
       args:
         chdir: "{{ target_home }}"
 
