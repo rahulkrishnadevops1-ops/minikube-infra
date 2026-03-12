@@ -59,7 +59,7 @@ pipeline {
         withCredentials([file(credentialsId: 'ssh-private-key', variable: 'ANSIBLE_KEY_FILE')]) {
           dir('ansible') {
             sh 'chmod +x inventory.py'
-            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook playbook.yml --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
+            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i ../infra/inventory.ini playbook.yml --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
           }
         }
       }
@@ -73,7 +73,7 @@ pipeline {
         withCredentials([file(credentialsId: 'ssh-private-key', variable: 'ANSIBLE_KEY_FILE')]) {
           dir('ansible') {
             sh 'chmod +x inventory.py'
-            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible minikube -m shell -a "kubectl get nodes && helm version --short" --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
+            sh 'ANSIBLE_HOST_KEY_CHECKING=False ansible -i ../infra/inventory.ini minikube -m shell -a "kubectl get nodes && helm version --short" --private-key "$ANSIBLE_KEY_FILE" -u ec2-user'
           }
         }
       }
