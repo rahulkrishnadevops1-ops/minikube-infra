@@ -75,7 +75,7 @@ pipeline {
       steps {
         withCredentials([file(credentialsId: 'ssh-private-key', variable: 'ANSIBLE_KEY_FILE')]) {
           sh '''
-            set -euo pipefail
+            set -eu
 
             EC2_PUBLIC_IP="$(awk 'NR==2 {print $1}' infra/inventory.ini)"
             if [ -z "${EC2_PUBLIC_IP}" ]; then
