@@ -10,6 +10,8 @@
     target_home: "/home/ec2-user"
     minikube_memory_mb: 2200
     minikube_cpus: 2
+    api_server_port: 8443
+    public_api_ip: "{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}"
 
   pre_tasks:
     - name: Wait for SSH to become available
@@ -75,13 +77,82 @@
         remote_src: true
         mode: "0755"
 
-    - name: Start Minikube with the Docker driver
+    - name: Start Minikube with the Docker driver and public API SAN
       become_user: "{{ target_user }}"
       ansible.builtin.shell: |
-        sg docker -c 'minikube status >/dev/null 2>&1 || minikube start --driver=docker --memory={{ minikube_memory_mb }} --cpus={{ minikube_cpus }}'
+        sg docker -c 'minikube start --driver=docker --memory={{ minikube_memory_mb }} --cpus={{ minikube_cpus }} --apiserver-ips={{ public_api_ip }}'
       args:
         executable: /bin/bash
         chdir: "{{ target_home }}"
+
+    - name: Install API proxy launcher for host port 8443
+      ansible.builtin.copy:
+        dest: /usr/local/bin/minikube-apiserver-proxy.sh
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
+          exec socat TCP-LISTEN:{{ api_server_port }},fork,reuseaddr TCP:${MK_IP}:{{ api_server_port }}
+
+    - name: Install systemd service for Minikube API proxy
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/minikube-apiserver-proxy.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Proxy host port {{ api_server_port }} to Minikube API server
+          After=network-online.target docker.service
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/minikube-apiserver-proxy.sh
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and restart Minikube API proxy service
+      ansible.builtin.systemd:
+        name: minikube-apiserver-proxy.service
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
+    - name: Update kubeconfig server endpoint to public IP
+      become_user: "{{ target_user }}"
+      ansible.builtin.replace:
+        path: "{{ target_home }}/.kube/config"
+        regexp: '(^\s*server:\s*)https://.*$'
+        replace: '\1https://{{ public_api_ip }}:{{ api_server_port }}'
+
+    - name: Generate portable kubeconfig for remote deployments
+      become_user: "{{ target_user }}"
+      ansible.builtin.shell: |
+        kubectl config view --raw --flatten --minify > "{{ target_home }}/kubeconfig-public.yaml"
+      args:
+        executable: /bin/bash
+        chdir: "{{ target_home }}"
+      environment:
+        KUBECONFIG: "{{ target_home }}/.kube/config"
+
+    - name: Ensure kubeconfig artifact directory exists on controller
+      delegate_to: localhost
+      become: false
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/artifacts"
+        state: directory
+        mode: "0755"
+
+    - name: Fetch generated kubeconfig to controller
+      become: false
+      ansible.builtin.fetch:
+        src: "{{ target_home }}/kubeconfig-public.yaml"
+        dest: "{{ playbook_dir }}/artifacts/kubeconfig-{{ inventory_hostname }}.yaml"
+        flat: true
 
     - name: Verify kubectl can reach the cluster
       become_user: "{{ target_user }}"
