@@ -1,6 +1,6 @@
 variable "aws_region" {
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
   description = "AWS region where the EC2 instance will be created."
 }
 
@@ -18,7 +18,7 @@ variable "instance_name" {
 
 variable "key_name" {
   type        = string
-  default     = "Ansible"
+  default     = "Nov-jenkins"
   description = "Existing AWS key pair name used to access the instance."
 }
 
