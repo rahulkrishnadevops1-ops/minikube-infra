@@ -1,4 +1,4 @@
-aws_region       = "eu-north-1"
+aws_region       = "ap-south-1"
 instance_type    = "c7i-flex.large"
 instance_name    = "minikube-control"
 key_name         = "Nov-jenkins"
