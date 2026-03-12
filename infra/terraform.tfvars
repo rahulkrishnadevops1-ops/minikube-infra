@@ -1,5 +1,5 @@
 aws_region       = "eu-north-1"
 instance_type    = "c7i-flex.large"
 instance_name    = "minikube-control"
-key_name         = "Ansible"
+key_name         = "Nov-jenkins"
 allowed_ssh_cidr = "0.0.0.0/0"
