@@ -30,6 +30,7 @@
           - git
           - iproute
           - iptables
+          - socat
           - tar
         state: present
         allowerasing: true
@@ -137,6 +138,42 @@
         enabled: true
         state: started
 
+    - name: Install API exposure script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/minikube-expose-apiserver.sh
+        mode: "0755"
+        content: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
+          exec socat TCP-LISTEN:{{ api_server_port }},fork,reuseaddr TCP:${MK_IP}:{{ api_server_port }}
+
+    - name: Install systemd service for API exposure
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/minikube-apiserver-expose.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Expose Minikube API server on EC2 host port {{ api_server_port }}
+          After=network-online.target docker.service
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/minikube-expose-apiserver.sh
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and run API exposure service
+      ansible.builtin.systemd:
+        name: minikube-apiserver-expose.service
+        daemon_reload: true
+        enabled: true
+        state: restarted
+
     - name: Refresh Minikube context on host
       become_user: "{{ target_user }}"
       ansible.builtin.command: minikube update-context
@@ -160,6 +197,23 @@
         regexp: '(^\s*server:\s*)https://.*$'
         replace: '\1https://127.0.0.1:{{ api_server_port }}'
 
+    - name: Generate portable kubeconfig for public endpoint usage
+      become_user: "{{ target_user }}"
+      ansible.builtin.shell: |
+        kubectl config view --raw --flatten --minify > "{{ target_home }}/kubeconfig-public.yaml"
+      args:
+        executable: /bin/bash
+        chdir: "{{ target_home }}"
+      environment:
+        KUBECONFIG: "{{ target_home }}/.kube/config"
+
+    - name: Set public kubeconfig server endpoint to EC2 public IP
+      become_user: "{{ target_user }}"
+      ansible.builtin.replace:
+        path: "{{ target_home }}/kubeconfig-public.yaml"
+        regexp: '(^\s*server:\s*)https://.*$'
+        replace: '\1https://{{ public_api_ip }}:{{ api_server_port }}'
+
     - name: Ensure kubeconfig artifact directory exists on controller
       delegate_to: localhost
       become: false
@@ -173,6 +227,13 @@
       ansible.builtin.fetch:
         src: "{{ target_home }}/kubeconfig-tunnel.yaml"
         dest: "{{ playbook_dir }}/artifacts/kubeconfig-tunnel-{{ inventory_hostname }}.yaml"
+        flat: true
+
+    - name: Fetch generated public kubeconfig to controller
+      become: false
+      ansible.builtin.fetch:
+        src: "{{ target_home }}/kubeconfig-public.yaml"
+        dest: "{{ playbook_dir }}/artifacts/kubeconfig-public-{{ inventory_hostname }}.yaml"
         flat: true
 
     - name: Verify kubectl can reach the cluster

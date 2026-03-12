@@ -55,35 +55,30 @@ The pipeline provisions the instance, uses the Terraform-generated inventory, an
 - 1 security group allowing SSH (22), HTTP (80), HTTPS (443), Kubernetes API (8443), and NodePort range (30000-32767)
 - Ansible inventory file at `infra/inventory.ini`
 
-## Access Minikube from another machine (SSH tunnel)
+## Access Minikube from another machine
 
-The Ansible playbook now keeps Minikube's local context healthy and generates a dedicated kubeconfig for SSH tunnel access.
+The Ansible playbook keeps Minikube local context healthy and now exposes the API server on EC2 host `:8443`.
 
 What the playbook does:
 
 1. Starts Minikube with API SANs (`<ec2-public-ip>,127.0.0.1`).
-2. Runs `minikube update-context` on the EC2 host to avoid kubeconfig mismatch.
-3. Generates tunnel kubeconfig (`kubectl config view --raw --flatten --minify`).
-4. Rewrites that kubeconfig server endpoint to `https://127.0.0.1:8443`.
-5. Fetches kubeconfig to `ansible/artifacts/kubeconfig-tunnel-<host-ip>.yaml` on the machine running Ansible.
+2. Exposes API port `8443` from EC2 host to Minikube IP via `minikube-apiserver-expose.service`.
+3. Exposes NodePort range `30000-32767` from EC2 host to Minikube IP via `minikube-nodeport-expose.service`.
+4. Runs `minikube update-context` on the EC2 host to avoid kubeconfig mismatch.
+5. Generates and fetches two kubeconfigs:
+   - `kubeconfig-public-<host-ip>.yaml` (server `https://<ec2-public-ip>:8443`)
+   - `kubeconfig-tunnel-<host-ip>.yaml` (server `https://127.0.0.1:8443`, optional fallback)
 
 Where to get kubeconfig:
 
-- Local run: `ansible/artifacts/kubeconfig-tunnel-<host-ip>.yaml` in this repository.
+- Local run: `ansible/artifacts/kubeconfig-public-<host-ip>.yaml` in this repository.
 - Jenkins run: same path inside Jenkins workspace and archived by the pipeline as a build artifact.
 
-Open SSH tunnel (Jenkins master or laptop):
+Use public kubeconfig (no tunnel needed):
 
 ```bash
-MINIKUBE_IP=$(ssh -i <private-key.pem> ec2-user@<ec2-public-ip> "minikube ip")
-ssh -i <private-key.pem> -o ExitOnForwardFailure=yes -N -L 8443:${MINIKUBE_IP}:8443 ec2-user@<ec2-public-ip>
-```
-
-Use tunnel kubeconfig:
-
-```bash
-kubectl --kubeconfig kubeconfig-tunnel-<host-ip>.yaml get nodes
-helm --kubeconfig kubeconfig-tunnel-<host-ip>.yaml list -A
+kubectl --kubeconfig kubeconfig-public-<host-ip>.yaml get nodes
+helm --kubeconfig kubeconfig-public-<host-ip>.yaml list -A
 ```
 
 NodePort app access (example `30081`) from another machine:

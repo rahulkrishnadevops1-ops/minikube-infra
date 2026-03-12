@@ -15,31 +15,26 @@ ansible-playbook playbook.yml
 
 ## Remote Minikube API access
 
-The playbook also prepares Minikube for access from another machine through an SSH tunnel.
+The playbook prepares Minikube for direct remote access (without mandatory SSH tunnel).
 
 Implemented behavior:
 
 1. Minikube starts with API SANs for public IP and localhost (`--apiserver-ips=<public-ip>,127.0.0.1`).
-2. `minikube update-context` is run on EC2 to keep host-side kubectl healthy.
-3. A flattened kubeconfig is generated at `/home/ec2-user/kubeconfig-tunnel.yaml`.
-4. Tunnel kubeconfig server endpoint is set to `https://127.0.0.1:8443`.
-5. The kubeconfig is fetched to `ansible/artifacts/kubeconfig-tunnel-<host-ip>.yaml`.
-6. A systemd service (`minikube-nodeport-expose.service`) exposes NodePort range `30000-32767` on EC2 public interface.
+2. A systemd service (`minikube-apiserver-expose.service`) exposes API port `8443` on EC2 host.
+3. A systemd service (`minikube-nodeport-expose.service`) exposes NodePort range `30000-32767` on EC2 public interface.
+4. `minikube update-context` is run on EC2 to keep host-side kubectl healthy.
+5. Flattened kubeconfigs are generated:
+   - `/home/ec2-user/kubeconfig-public.yaml` (public endpoint)
+   - `/home/ec2-user/kubeconfig-tunnel.yaml` (localhost endpoint)
+6. Both kubeconfigs are fetched to `ansible/artifacts/`.
 
 ## Using kubeconfig from another machine
 
-1. Get `ansible/artifacts/kubeconfig-tunnel-<host-ip>.yaml` from local run output or Jenkins artifact.
-2. Open tunnel:
+1. Get `ansible/artifacts/kubeconfig-public-<host-ip>.yaml` from local run output or Jenkins artifact.
+2. Run:
 
 ```bash
-MINIKUBE_IP=$(ssh -i <private-key.pem> ec2-user@<ec2-public-ip> "minikube ip")
-ssh -i <private-key.pem> -o ExitOnForwardFailure=yes -N -L 8443:${MINIKUBE_IP}:8443 ec2-user@<ec2-public-ip>
-```
-
-3. Run:
-
-```bash
-kubectl --kubeconfig kubeconfig-tunnel-<host-ip>.yaml get nodes
+kubectl --kubeconfig kubeconfig-public-<host-ip>.yaml get nodes
 ```
 
 ## Access app via public IP (NodePort)
