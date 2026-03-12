@@ -8,8 +8,8 @@
     minikube_version: "v1.35.0"
     helm_version: "v3.15.4"
 
-    target_user: "ec2-user"
-    target_home: "/home/ec2-user"
+    target_user: ec2-user
+    target_home: /home/ec2-user
 
     minikube_memory_mb: 2200
     minikube_cpus: 2
@@ -22,208 +22,196 @@
 
   pre_tasks:
 
-    - name: Wait for SSH to become available
-      ansible.builtin.wait_for_connection:
-        timeout: 300
+  - name: Wait for SSH
+    wait_for_connection:
+      timeout: 300
 
   tasks:
 
-    - name: Install OS packages required for Docker and Minikube
-      ansible.builtin.dnf:
-        name:
-          - docker
-          - conntrack
-          - curl
-          - git
-          - iproute
-          - iptables
-          - socat
-          - tar
-        state: present
-        allowerasing: true
+  - name: Install required packages
+    dnf:
+      name:
+        - docker
+        - conntrack
+        - curl
+        - git
+        - iproute
+        - iptables
+        - socat
+        - tar
+      state: present
+      allowerasing: true
 
-    - name: Enable and start Docker
-      ansible.builtin.systemd:
-        name: docker
-        enabled: true
-        state: started
+  - name: Enable and start Docker
+    systemd:
+      name: docker
+      enabled: true
+      state: started
 
-    - name: Add ec2-user to docker group
-      ansible.builtin.user:
-        name: "{{ target_user }}"
-        groups: docker
-        append: true
+  - name: Add ec2-user to docker group
+    user:
+      name: "{{ target_user }}"
+      groups: docker
+      append: true
 
-    - name: Ensure docker socket permissions
-      ansible.builtin.file:
-        path: /var/run/docker.sock
-        mode: "0666"
+  - name: Install kubectl
+    get_url:
+      url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
+      dest: /usr/local/bin/kubectl
+      mode: "0755"
 
-    - name: Download kubectl
-      ansible.builtin.get_url:
-        url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
-        dest: /usr/local/bin/kubectl
-        mode: "0755"
+  - name: Install Minikube
+    get_url:
+      url: "https://storage.googleapis.com/minikube/releases/{{ minikube_version }}/minikube-linux-amd64"
+      dest: /usr/local/bin/minikube
+      mode: "0755"
 
-    - name: Download Minikube
-      ansible.builtin.get_url:
-        url: "https://storage.googleapis.com/minikube/releases/{{ minikube_version }}/minikube-linux-amd64"
-        dest: /usr/local/bin/minikube
-        mode: "0755"
+  - name: Download Helm
+    get_url:
+      url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+      dest: /tmp/helm.tar.gz
 
-    - name: Download Helm archive
-      ansible.builtin.get_url:
-        url: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
-        dest: /tmp/helm.tar.gz
+  - name: Extract Helm
+    unarchive:
+      src: /tmp/helm.tar.gz
+      dest: /tmp
+      remote_src: true
 
-    - name: Extract Helm archive
-      ansible.builtin.unarchive:
-        src: /tmp/helm.tar.gz
-        dest: /tmp
-        remote_src: true
+  - name: Install Helm
+    copy:
+      src: /tmp/linux-amd64/helm
+      dest: /usr/local/bin/helm
+      remote_src: true
+      mode: "0755"
 
-    - name: Install Helm binary
-      ansible.builtin.copy:
-        src: /tmp/linux-amd64/helm
-        dest: /usr/local/bin/helm
-        remote_src: true
-        mode: "0755"
+  - name: Start Minikube cluster
+    become_user: "{{ target_user }}"
+    shell: |
+      minikube start \
+      --driver=docker \
+      --memory={{ minikube_memory_mb }} \
+      --cpus={{ minikube_cpus }} \
+      --apiserver-ips={{ public_api_ip }},127.0.0.1
+    args:
+      executable: /bin/bash
+      chdir: "{{ target_home }}"
 
-    - name: Start Minikube with Docker driver
-      become_user: "{{ target_user }}"
-      ansible.builtin.shell: |
-        sudo minikube start \
-          --driver=docker \
-          --memory={{ minikube_memory_mb }} \
-          --cpus={{ minikube_cpus }} \
-          --apiserver-ips={{ public_api_ip }},127.0.0.1
-      args:
-        executable: /bin/bash
-        chdir: "{{ target_home }}"
+  - name: Install NodePort exposure script
+    copy:
+      dest: /usr/local/bin/minikube-expose-nodeports.sh
+      mode: "0755"
+      content: |
+        #!/usr/bin/env bash
+        START="{{ nodeport_range_start }}"
+        END="{{ nodeport_range_end }}"
+        CHAIN="MINIKUBE_NODEPORT"
 
-    - name: Install NodePort exposure script
-      ansible.builtin.copy:
-        dest: /usr/local/bin/minikube-expose-nodeports.sh
-        mode: "0755"
-        content: |
-          #!/usr/bin/env bash
-          set -e
+        MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
 
-          START="{{ nodeport_range_start }}"
-          END="{{ nodeport_range_end }}"
-          CHAIN="MINIKUBE_NODEPORT"
+        iptables -t nat -N "${CHAIN}" 2>/dev/null || true
+        iptables -t nat -F "${CHAIN}"
+        iptables -t nat -A "${CHAIN}" -j DNAT --to-destination "${MK_IP}"
 
-          MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
+        iptables -t nat -C PREROUTING -p tcp --dport "${START}:${END}" -j "${CHAIN}" 2>/dev/null || \
+        iptables -t nat -A PREROUTING -p tcp --dport "${START}:${END}" -j "${CHAIN}"
 
-          iptables -t nat -N "${CHAIN}" 2>/dev/null || true
-          iptables -t nat -F "${CHAIN}"
-          iptables -t nat -A "${CHAIN}" -j DNAT --to-destination "${MK_IP}"
+        iptables -C FORWARD -p tcp --dport "${START}:${END}" -j ACCEPT 2>/dev/null || \
+        iptables -A FORWARD -p tcp --dport "${START}:${END}" -j ACCEPT
 
-          iptables -t nat -C PREROUTING -p tcp --dport "${START}:${END}" -j "${CHAIN}" 2>/dev/null || \
-          iptables -t nat -A PREROUTING -p tcp --dport "${START}:${END}" -j "${CHAIN}"
+  - name: Install NodePort systemd service
+    copy:
+      dest: /etc/systemd/system/minikube-nodeport-expose.service
+      content: |
+        [Unit]
+        Description=Expose Minikube NodePort range
 
-          iptables -C FORWARD -p tcp --dport "${START}:${END}" -j ACCEPT 2>/dev/null || \
-          iptables -A FORWARD -p tcp --dport "${START}:${END}" -j ACCEPT
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/bin/minikube-expose-nodeports.sh
+        RemainAfterExit=yes
 
-    - name: Install NodePort systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/minikube-nodeport-expose.service
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=Expose Minikube NodePort range
-          After=network-online.target docker.service
+        [Install]
+        WantedBy=multi-user.target
 
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/minikube-expose-nodeports.sh
-          RemainAfterExit=yes
+  - name: Enable NodePort service
+    systemd:
+      name: minikube-nodeport-expose.service
+      daemon_reload: true
+      enabled: true
+      state: started
 
-          [Install]
-          WantedBy=multi-user.target
+  - name: Install API exposure script
+    copy:
+      dest: /usr/local/bin/minikube-expose-apiserver.sh
+      mode: "0755"
+      content: |
+        #!/usr/bin/env bash
+        MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
+        exec socat TCP-LISTEN:{{ api_server_port }},fork,reuseaddr TCP:${MK_IP}:{{ api_server_port }}
 
-    - name: Enable NodePort service
-      ansible.builtin.systemd:
-        name: minikube-nodeport-expose.service
-        daemon_reload: true
-        enabled: true
-        state: started
+  - name: Install API exposure service
+    copy:
+      dest: /etc/systemd/system/minikube-apiserver-expose.service
+      content: |
+        [Unit]
+        Description=Expose Minikube API server
 
-    - name: Install API exposure script
-      ansible.builtin.copy:
-        dest: /usr/local/bin/minikube-expose-apiserver.sh
-        mode: "0755"
-        content: |
-          #!/usr/bin/env bash
-          MK_IP="$(runuser -l {{ target_user }} -c 'minikube ip')"
-          exec socat TCP-LISTEN:{{ api_server_port }},fork,reuseaddr TCP:${MK_IP}:{{ api_server_port }}
+        [Service]
+        Type=simple
+        ExecStart=/usr/local/bin/minikube-expose-apiserver.sh
+        Restart=always
 
-    - name: Install API exposure service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/minikube-apiserver-expose.service
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=Expose Minikube API server
-          After=network-online.target docker.service
+        [Install]
+        WantedBy=multi-user.target
 
-          [Service]
-          Type=simple
-          ExecStart=/usr/local/bin/minikube-expose-apiserver.sh
-          Restart=always
+  - name: Enable API exposure service
+    systemd:
+      name: minikube-apiserver-expose.service
+      daemon_reload: true
+      enabled: true
+      state: restarted
 
-          [Install]
-          WantedBy=multi-user.target
+  - name: Update kubeconfig context
+    become_user: "{{ target_user }}"
+    command: minikube update-context
+    environment:
+      CHANGE_MINIKUBE_NONE_USER: "true"
+    args:
+      chdir: "{{ target_home }}"
 
-    - name: Enable API exposure service
-      ansible.builtin.systemd:
-        name: minikube-apiserver-expose.service
-        daemon_reload: true
-        enabled: true
-        state: restarted
+  - name: Generate public kubeconfig
+    become_user: "{{ target_user }}"
+    shell: |
+      kubectl config view --raw --flatten --minify > "{{ target_home }}/kubeconfig-public.yaml"
+    args:
+      executable: /bin/bash
+      chdir: "{{ target_home }}"
+    environment:
+      KUBECONFIG: "{{ target_home }}/.kube/config"
 
-    - name: Refresh Minikube context
-      become_user: "{{ target_user }}"
-      ansible.builtin.command: minikube update-context
-      environment:
-        CHANGE_MINIKUBE_NONE_USER: "true"
-      args:
-        chdir: "{{ target_home }}"
+  - name: Replace kubeconfig server endpoint
+    become_user: "{{ target_user }}"
+    replace:
+      path: "{{ target_home }}/kubeconfig-public.yaml"
+      regexp: 'server: https://.*'
+      replace: 'server: https://{{ public_api_ip }}:{{ api_server_port }}'
 
-    - name: Generate kubeconfig
-      become_user: "{{ target_user }}"
-      ansible.builtin.shell: |
-        kubectl config view --raw --flatten --minify > {{ target_home }}/kubeconfig-public.yaml
-      args:
-        executable: /bin/bash
-        chdir: "{{ target_home }}"
-      environment:
-        KUBECONFIG: "{{ target_home }}/.kube/config"
+  - name: Ensure artifact directory
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ playbook_dir }}/artifacts"
+      state: directory
+      mode: "0755"
 
-    - name: Replace kubeconfig server with public IP
-      become_user: "{{ target_user }}"
-      ansible.builtin.replace:
-        path: "{{ target_home }}/kubeconfig-public.yaml"
-        regexp: 'server: https://.*'
-        replace: 'server: https://{{ public_api_ip }}:{{ api_server_port }}'
+  - name: Fetch kubeconfig
+    fetch:
+      src: "{{ target_home }}/kubeconfig-public.yaml"
+      dest: "{{ playbook_dir }}/artifacts/kubeconfig-public-{{ inventory_hostname }}.yaml"
+      flat: true
 
-    - name: Create artifacts directory on controller
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ playbook_dir }}/artifacts"
-        state: directory
-        mode: "0755"
-
-    - name: Fetch kubeconfig to controller
-      become: false
-      ansible.builtin.fetch:
-        src: "{{ target_home }}/kubeconfig-public.yaml"
-        dest: "{{ playbook_dir }}/artifacts/kubeconfig-public-{{ inventory_hostname }}.yaml"
-        flat: true
-
-    - name: Verify cluster is working
-      become_user: "{{ target_user }}"
-      ansible.builtin.command: kubectl get nodes
-      environment:
-        KUBECONFIG: "{{ target_home }}/.kube/config"
+  - name: Verify cluster
+    become_user: "{{ target_user }}"
+    command: kubectl get nodes
+    environment:
+      KUBECONFIG: "{{ target_home }}/.kube/config"
